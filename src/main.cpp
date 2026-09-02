@@ -11,7 +11,7 @@
 #include <algorithm>
 
 // ============================================================
-// RIPLEY2048 PowerOff Edition v1.1 — GAME + ALBUM + 2-MIN AUTO-OFF
+// RIPLEY2048 PowerOff Edition v1.2 — STANDALONE GAME + ALBUM + 2-MIN AUTO-OFF
 // ============================================================
 // Native PaperS3 power behavior:
 //   single click side button = power ON
@@ -90,8 +90,8 @@ static constexpr uint8_t UI_WHITE_GRAY = 255;
 // small framed picture. Keep the artwork itself mostly white with
 // only 3–4 gray levels and lots of negative space.
 //
-// REQUIRED SD ART SIZE: exactly 500 x 400 px.
-// Files remain in /2048ripleybg/ so the original level logic is intact.
+// Six 500 x 400 RGB565 growth images are embedded in firmware flash.
+// microSD is NOT used by the 2048 game artwork anymore.
 static constexpr int BACKGROUND_X = 20;
 static constexpr int BACKGROUND_Y = 75;
 static constexpr int BACKGROUND_W = 500;
@@ -101,13 +101,29 @@ static constexpr int BACKGROUND_H = 400;
 // the left edge of an RGB565 image. Mask a tiny strip afterwards.
 static constexpr int BACKGROUND_LEFT_EDGE_MASK = 2;
 
-static const char *BACKGROUND_FILES[6] = {
-  "/2048ripleybg/bg0.bin",  // lying down
-  "/2048ripleybg/bg1.bin",  // sitting
-  "/2048ripleybg/bg2.bin",  // standing
-  "/2048ripleybg/bg3.bin",  // running
-  "/2048ripleybg/bg4.bin",  // play bow
-  "/2048ripleybg/bg5.bin"   // final sitting pose
+extern "C" {
+  extern const uint8_t ripley_bg0_start[] asm("ripley_bg0_start");
+  extern const uint8_t ripley_bg0_end[]   asm("ripley_bg0_end");
+  extern const uint8_t ripley_bg1_start[] asm("ripley_bg1_start");
+  extern const uint8_t ripley_bg1_end[]   asm("ripley_bg1_end");
+  extern const uint8_t ripley_bg2_start[] asm("ripley_bg2_start");
+  extern const uint8_t ripley_bg2_end[]   asm("ripley_bg2_end");
+  extern const uint8_t ripley_bg3_start[] asm("ripley_bg3_start");
+  extern const uint8_t ripley_bg3_end[]   asm("ripley_bg3_end");
+  extern const uint8_t ripley_bg4_start[] asm("ripley_bg4_start");
+  extern const uint8_t ripley_bg4_end[]   asm("ripley_bg4_end");
+  extern const uint8_t ripley_bg5_start[] asm("ripley_bg5_start");
+  extern const uint8_t ripley_bg5_end[]   asm("ripley_bg5_end");
+}
+
+static const uint8_t *const BACKGROUND_DATA[6] = {
+  ripley_bg0_start, ripley_bg1_start, ripley_bg2_start,
+  ripley_bg3_start, ripley_bg4_start, ripley_bg5_start
+};
+
+static const uint8_t *const BACKGROUND_END[6] = {
+  ripley_bg0_end, ripley_bg1_end, ripley_bg2_end,
+  ripley_bg3_end, ripley_bg4_end, ripley_bg5_end
 };
 
 // Dedicated full alarm artwork (500 x 400 RGB565).
@@ -529,12 +545,6 @@ void unmountSdForClock() {
 }
 
 
-static const char *SAVE_FILES[3] = {
-  "/2048_save_1.txt",
-  "/2048_save_2.txt",
-  "/2048_save_3.txt"
-};
-
 int selectedSaveSlot = 1;
 
 // ============================================================
@@ -678,6 +688,21 @@ bool drawBackgroundBIN(const char *filename) {
   return true;
 }
 
+bool drawEmbeddedBackground(int level) {
+  level = constrain(level, 0, 5);
+  const size_t expectedBytes =
+    (size_t)BACKGROUND_W * BACKGROUND_H * sizeof(uint16_t);
+  const uint8_t *src = BACKGROUND_DATA[level];
+  const size_t bytes = (size_t)(BACKGROUND_END[level] - src);
+  if (bytes != expectedBytes) return false;
+
+  M5.Display.pushImage(
+    BACKGROUND_X, BACKGROUND_Y, BACKGROUND_W, BACKGROUND_H,
+    reinterpret_cast<const lgfx::rgb565_t *>(src)
+  );
+  return true;
+}
+
 void drawBackground() {
 
   if (backgroundLevel < 0)
@@ -694,9 +719,7 @@ void drawBackground() {
     gray565(UI_WHITE_GRAY)
   );
 
-  drawBackgroundBIN(
-    BACKGROUND_FILES[backgroundLevel]
-  );
+  drawEmbeddedBackground(backgroundLevel);
 
   if (BACKGROUND_LEFT_EDGE_MASK > 0) {
 
@@ -3163,297 +3186,72 @@ void drawGame() {
 // backgroundLevel
 // ============================================================
 
+struct UserSaveState {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t reserved;
+  uint64_t board[4][4];
+  uint64_t score;
+  uint64_t bestScore;
+  int32_t backgroundLevel;
+};
+
+static const char *slotKey(int slot) {
+  static const char *keys[3] = {"slot1", "slot2", "slot3"};
+  return (slot >= 1 && slot <= 3) ? keys[slot - 1] : nullptr;
+}
+
+bool hasGameSlot(int slot) {
+  const char *key = slotKey(slot);
+  if (!key) return false;
+  Preferences p;
+  p.begin("ripley2048", true);
+  size_t n = p.getBytesLength(key);
+  p.end();
+  return n == sizeof(UserSaveState);
+}
+
 void saveGame(int slot) {
+  const char *key = slotKey(slot);
+  if (!key) return;
+  UserSaveState s = {};
+  s.magic = RESUME_MAGIC;
+  s.version = RESUME_VERSION;
+  memcpy(s.board, board, sizeof(board));
+  s.score = score;
+  s.bestScore = bestScore;
+  s.backgroundLevel = backgroundLevel;
 
-  if (!sdReady) return;
-
-  if (
-    slot < 1 ||
-    slot > 3
-  ) {
-    return;
-  }
-
-  const char *filename =
-    SAVE_FILES[slot - 1];
-
-  SD.remove(filename);
-
-  File f =
-    SD.open(
-      filename,
-      FILE_WRITE
-    );
-
-  if (!f) return;
-
-  for (int r = 0; r < 4; ++r) {
-
-    for (int c = 0; c < 4; ++c) {
-
-      f.printf(
-        "%llu",
-        (unsigned long long)
-          board[r][c]
-      );
-
-      if (c != 3) {
-        f.print(',');
-      }
-    }
-
-    f.println();
-  }
-
-  f.printf(
-    "%llu\n",
-    (unsigned long long)score
-  );
-
-  f.printf(
-    "%llu\n",
-    (unsigned long long)bestScore
-  );
-
-  f.printf(
-    "%d\n",
-    backgroundLevel
-  );
-
-  f.close();
+  Preferences p;
+  p.begin("ripley2048", false);
+  p.putBytes(key, &s, sizeof(s));
+  p.end();
+  selectedSaveSlot = slot;
 }
-
-// ============================================================
-// READ U64
-// ============================================================
-
-bool readU64Line(
-  File &f,
-  uint64_t &out
-) {
-
-  String s =
-    f.readStringUntil('\n');
-
-  s.trim();
-
-  if (!s.length()) {
-    return false;
-  }
-
-  char *endp = nullptr;
-
-  unsigned long long v =
-    strtoull(
-      s.c_str(),
-      &endp,
-      10
-    );
-
-  if (
-    !endp ||
-    *endp != '\0'
-  ) {
-    return false;
-  }
-
-  out = (uint64_t)v;
-
-  return true;
-}
-
-// ============================================================
-// LOAD
-// ============================================================
 
 void loadGame(int slot) {
+  const char *key = slotKey(slot);
+  if (!key) return;
+  UserSaveState s = {};
+  Preferences p;
+  p.begin("ripley2048", true);
+  size_t n = p.getBytes(key, &s, sizeof(s));
+  p.end();
+  if (n != sizeof(s) || s.magic != RESUME_MAGIC || s.version != RESUME_VERSION) return;
 
-  if (!sdReady) return;
-
-  if (
-    slot < 1 ||
-    slot > 3
-  ) {
-    return;
-  }
-
-  const char *filename =
-    SAVE_FILES[slot - 1];
-
-  if (!SD.exists(filename)) {
-    return;
-  }
-
-  File f =
-    SD.open(
-      filename,
-      FILE_READ
-    );
-
-  if (!f) return;
-
-  uint64_t tempBoard[4][4] = {};
-  uint64_t tempScore = 0;
-  uint64_t tempBest = 0;
-
-  bool ok = true;
-
-  for (int r = 0; r < 4 && ok; ++r) {
-
-    String line =
-      f.readStringUntil('\n');
-
-    line.trim();
-
-    int start = 0;
-
-    for (int c = 0; c < 4; ++c) {
-
-      int comma =
-        line.indexOf(
-          ',',
-          start
-        );
-
-      if (comma < 0) {
-        comma =
-          line.length();
-      }
-
-      String s =
-        line.substring(
-          start,
-          comma
-        );
-
-      s.trim();
-
-      char *endp = nullptr;
-
-      unsigned long long v =
-        strtoull(
-          s.c_str(),
-          &endp,
-          10
-        );
-
-      if (
-        !endp ||
-        *endp != '\0'
-      ) {
-
-        ok = false;
-        break;
-      }
-
-      tempBoard[r][c] =
-        (uint64_t)v;
-
-      start =
-        comma + 1;
-    }
-  }
-
-  if (ok) {
-    ok =
-      readU64Line(
-        f,
-        tempScore
-      );
-  }
-
-  if (ok) {
-    ok =
-      readU64Line(
-        f,
-        tempBest
-      );
-  }
-
-  int tempBackground = -1;
-
-  if (ok && f.available()) {
-
-    String s =
-      f.readStringUntil('\n');
-
-    s.trim();
-
-    if (s.length()) {
-
-      tempBackground =
-        s.toInt();
-    }
-  }
-
-  f.close();
-
-  // Bad save:
-  // leave current game untouched.
-  if (!ok) {
-    return;
-  }
-
-  memcpy(
-    board,
-    tempBoard,
-    sizeof(board)
-  );
-
-  score =
-    tempScore;
-
-  bestScore =
-    tempBest;
-
-  selectedSaveSlot =
-    slot;
-
-  gameOver =
-    isGameOver();
-
+  memcpy(board, s.board, sizeof(board));
+  score = s.score;
+  bestScore = s.bestScore;
+  selectedSaveSlot = slot;
+  gameOver = isGameOver();
   moveCount = 0;
-
-  int boardLevel =
-    backgroundLevelForValue(
-      getMaximumTile()
-    );
-
-  if (tempBackground >= 0) {
-
-    if (tempBackground < 0) {
-      tempBackground = 0;
-    }
-
-    if (tempBackground > 5) {
-      tempBackground = 5;
-    }
-
-    backgroundLevel =
-      tempBackground;
-
-    if (
-      boardLevel >
-      backgroundLevel
-    ) {
-
-      backgroundLevel =
-        boardLevel;
-    }
-
-  } else {
-
-    // Old save format
-    backgroundLevel =
-      boardLevel;
-  }
-
-  oldBackgroundLevel =
-    backgroundLevel;
-
+  int boardLevel = backgroundLevelForValue(getMaximumTile());
+  backgroundLevel = constrain((int)s.backgroundLevel, 0, 5);
+  if (boardLevel > backgroundLevel) backgroundLevel = boardLevel;
+  oldBackgroundLevel = backgroundLevel;
   forceFullRefresh = true;
+  saveResumeGame();
 }
-
 
 // ============================================================
 // PHOTO ALBUM
@@ -4138,7 +3936,7 @@ void setup() {
   // Restore the exact active game checkpoint first.  This is independent
   // of the three user SAVE slots, so powering off never overwrites them.
   if (!loadResumeGame()) {
-    if (sdReady && SD.exists(SAVE_FILES[0])) {
+    if (hasGameSlot(1)) {
       selectedSaveSlot = 1;
       loadGame(1);
     } else {
