@@ -1,0 +1,48 @@
+name: Deploy Web Installer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: pip install platformio
+      - run: pio run -e PaperS3
+      - name: Merge factory image
+        shell: bash
+        run: |
+          BUILD=".pio/build/PaperS3"
+          ESPTOOL="$(find ~/.platformio/packages/tool-esptoolpy -type f -name esptool.py | head -1)"
+          python "$ESPTOOL" --chip esp32s3 merge_bin \
+            -o "$BUILD/Ripley2048_factory.bin" \
+            --flash_mode dio --flash_freq 80m --flash_size 16MB \
+            0x0000 "$BUILD/bootloader.bin" \
+            0x8000 "$BUILD/partitions.bin" \
+            0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin \
+            0x10000 "$BUILD/firmware.bin"
+          mkdir -p web/firmware
+          cp "$BUILD/Ripley2048_factory.bin" web/firmware/Ripley2048_factory.bin
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
