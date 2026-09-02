@@ -11,7 +11,7 @@
 #include <algorithm>
 
 // ============================================================
-// RIPLEY2048 PowerOff Edition v1.2 — STANDALONE GAME + ALBUM + 2-MIN AUTO-OFF
+// RIPLEY2048 PowerOff Edition v1.2.1 — STANDALONE GAME + ALBUM + 2-MIN AUTO-OFF
 // ============================================================
 // Native PaperS3 power behavior:
 //   single click side button = power ON
@@ -699,12 +699,9 @@ bool drawEmbeddedBackground(int level) {
   if (bytes != expectedBytes)
     return false;
 
-  // IMPORTANT: keep the exact mature SD-rendering path: first stage the
-  // complete RGB565 frame in writable RAM, then let M5GFX push from RAM.
-  // Pushing a 400 kB image directly from the linker-mapped flash region can
-  // produce a visible horizontal tonal boundary on PaperS3 even after a full
-  // E-Ink refresh.  Copying to the existing image buffer removes that flash /
-  // transfer boundary without changing a single source pixel.
+  // Stage the complete embedded RGB565 image in the same writable RAM
+  // buffer used by the mature SD path.  This keeps flash mapping / transfer
+  // boundaries out of the E-Ink drawing path.
   if (!ensureBackgroundImageBuffer())
     return false;
 
@@ -733,14 +730,10 @@ void drawBackground() {
   if (backgroundLevel > 5)
     backgroundLevel = 5;
 
-  M5.Display.fillRect(
-    BACKGROUND_X,
-    BACKGROUND_Y,
-    BACKGROUND_W,
-    BACKGROUND_H,
-    gray565(UI_WHITE_GRAY)
-  );
-
+  // The full-game renderer already clears the entire framebuffer.
+  // Do not paint a second white 500x400 rectangle immediately before the
+  // artwork; on PaperS3 that extra pass can quantize differently and show up
+  // as a horizontal/tonal seam inside a mostly-white illustration.
   drawEmbeddedBackground(backgroundLevel);
 
   if (BACKGROUND_LEFT_EDGE_MASK > 0) {
@@ -1979,10 +1972,6 @@ void drawAlarmRingingScreen() {
 
   M5.Display.print(hint);
 
-  M5.Display.setEpdMode(
-    epd_mode_t::epd_quality
-  );
-
   M5.Display.display();
 
   M5.Display.setEpdMode(
@@ -3095,6 +3084,15 @@ void handleAlarmSettingTap(
 
 void drawFullGame() {
 
+  // IMPORTANT for PaperS3: select the quality waveform BEFORE composing the
+  // framebuffer.  M5GFX's E-Ink rendering/quantization can depend on the
+  // active EPD mode while pixels are written.  Drawing in epd_fastest and
+  // switching to epd_quality only at display() can leave two slightly
+  // different white/gray regions in one 500x400 image.
+  M5.Display.setEpdMode(
+    epd_mode_t::epd_quality
+  );
+
   M5.Display.fillScreen(
     gray565(UI_WHITE_GRAY)
   );
@@ -3113,10 +3111,7 @@ void drawFullGame() {
   drawGameOver();
   drawStatusBar();
 
-  M5.Display.setEpdMode(
-    epd_mode_t::epd_quality
-  );
-
+  // Commit the already-quality-composed framebuffer in one full refresh.
   M5.Display.display();
 
   M5.Display.setEpdMode(
@@ -4061,6 +4056,8 @@ void loop() {
 
   const uint32_t nowMs = millis();
 
+  serviceAutoPowerOff(nowMs);
+
   // POWER v5: deliberately no RTC polling, alarm polling,
   // clock maintenance, slideshow timer, Wi-Fi task or Bluetooth task.
 
@@ -4089,11 +4086,6 @@ void loop() {
     // v5 has no CLOCK mode.  Keep the old guard permanently disarmed.
     clockAlbumPressArmed = false;
   }
-
-  // Check inactivity only AFTER sampling the current touch.  A finger that
-  // lands exactly at the 2-minute boundary therefore resets the timer before
-  // automatic power-off can fire.
-  serviceAutoPowerOff(nowMs);
 
   if (
     !t.wasReleased() ||
