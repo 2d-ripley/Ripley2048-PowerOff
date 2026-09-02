@@ -1,6 +1,6 @@
 {
   "name": "Ripley2048 PaperS3 PowerOff Edition",
-  "version": "1.0.0",
+  "version": "1.2.2",
   "new_install_prompt_erase": true,
   "builds": [
     {
