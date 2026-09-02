@@ -11,7 +11,7 @@
 #include <algorithm>
 
 // ============================================================
-// RIPLEY2048 PowerOff Edition v1.2.1 — STANDALONE GAME + ALBUM + 2-MIN AUTO-OFF
+// RIPLEY2048 PowerOff Edition v1.2.2 — STANDALONE GAME + ALBUM + 2-MIN AUTO-OFF
 // ============================================================
 // Native PaperS3 power behavior:
 //   single click side button = power ON
@@ -710,6 +710,22 @@ bool drawEmbeddedBackground(int level) {
     src,
     expectedBytes
   );
+
+  // v1.2.2: very slightly lighten ONLY the embedded Ripley game artwork.
+  // Move each RGB565 channel ~4% toward white.  This is intentionally
+  // subtle and leaves tiles/UI/Album/refresh behavior completely unchanged.
+  for (size_t i = 0; i < (size_t)BACKGROUND_W * BACKGROUND_H; ++i) {
+    uint16_t p = backgroundImage[i];
+    uint16_t r = (p >> 11) & 0x1F;
+    uint16_t g = (p >> 5)  & 0x3F;
+    uint16_t b = p & 0x1F;
+
+    r = min<uint16_t>(31, r + ((31 - r + 12) / 25));
+    g = min<uint16_t>(63, g + ((63 - g + 12) / 25));
+    b = min<uint16_t>(31, b + ((31 - b + 12) / 25));
+
+    backgroundImage[i] = (uint16_t)((r << 11) | (g << 5) | b);
+  }
 
   M5.Display.pushImage(
     BACKGROUND_X,
