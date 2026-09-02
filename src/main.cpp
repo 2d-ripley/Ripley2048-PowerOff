@@ -11,7 +11,7 @@
 #include <algorithm>
 
 // ============================================================
-// RIPLEY2048 PowerOff Edition v1.2.2 — STANDALONE GAME + ALBUM + 2-MIN AUTO-OFF
+// RIPLEY2048 PowerOff Edition v1.3.0 — STANDALONE GAME + ALBUM + 2-MIN AUTO-OFF
 // ============================================================
 // Native PaperS3 power behavior:
 //   single click side button = power ON
@@ -90,7 +90,7 @@ static constexpr uint8_t UI_WHITE_GRAY = 255;
 // small framed picture. Keep the artwork itself mostly white with
 // only 3–4 gray levels and lots of negative space.
 //
-// Six 500 x 400 RGB565 growth images are embedded in firmware flash.
+// Eight 500 x 400 RGB565 growth images are embedded in firmware flash.
 // microSD is NOT used by the 2048 game artwork anymore.
 static constexpr int BACKGROUND_X = 20;
 static constexpr int BACKGROUND_Y = 75;
@@ -114,16 +114,20 @@ extern "C" {
   extern const uint8_t ripley_bg4_end[]   asm("ripley_bg4_end");
   extern const uint8_t ripley_bg5_start[] asm("ripley_bg5_start");
   extern const uint8_t ripley_bg5_end[]   asm("ripley_bg5_end");
+  extern const uint8_t ripley_bg6_start[] asm("ripley_bg6_start");
+  extern const uint8_t ripley_bg6_end[]   asm("ripley_bg6_end");
+  extern const uint8_t ripley_bg7_start[] asm("ripley_bg7_start");
+  extern const uint8_t ripley_bg7_end[]   asm("ripley_bg7_end");
 }
 
-static const uint8_t *const BACKGROUND_DATA[6] = {
-  ripley_bg0_start, ripley_bg1_start, ripley_bg2_start,
-  ripley_bg3_start, ripley_bg4_start, ripley_bg5_start
+static const uint8_t *const BACKGROUND_DATA[8] = {
+  ripley_bg0_start, ripley_bg1_start, ripley_bg2_start, ripley_bg3_start,
+  ripley_bg4_start, ripley_bg5_start, ripley_bg6_start, ripley_bg7_start
 };
 
-static const uint8_t *const BACKGROUND_END[6] = {
-  ripley_bg0_end, ripley_bg1_end, ripley_bg2_end,
-  ripley_bg3_end, ripley_bg4_end, ripley_bg5_end
+static const uint8_t *const BACKGROUND_END[8] = {
+  ripley_bg0_end, ripley_bg1_end, ripley_bg2_end, ripley_bg3_end,
+  ripley_bg4_end, ripley_bg5_end, ripley_bg6_end, ripley_bg7_end
 };
 
 // Dedicated full alarm artwork (500 x 400 RGB565).
@@ -689,7 +693,7 @@ bool drawBackgroundBIN(const char *filename) {
 }
 
 bool drawEmbeddedBackground(int level) {
-  level = constrain(level, 0, 5);
+  level = constrain(level, 0, 7);
 
   const size_t expectedBytes =
     (size_t)BACKGROUND_W * BACKGROUND_H * sizeof(uint16_t);
@@ -743,8 +747,8 @@ void drawBackground() {
   if (backgroundLevel < 0)
     backgroundLevel = 0;
 
-  if (backgroundLevel > 5)
-    backgroundLevel = 5;
+  if (backgroundLevel > 7)
+    backgroundLevel = 7;
 
   // The full-game renderer already clears the entire framebuffer.
   // Do not paint a second white 500x400 rectangle immediately before the
@@ -805,8 +809,10 @@ uint64_t getMaximumTile() {
 
 int backgroundLevelForValue(uint64_t v) {
 
-  if (v >= 32768) return 5;
-  if (v >= 16384) return 4;
+  if (v >= 131072) return 7;
+  if (v >= 65536)  return 6;
+  if (v >= 32768)  return 5;
+  if (v >= 16384)  return 4;
   if (v >= 8192)  return 3;
   if (v >= 4096)  return 2;
   if (v >= 2048)  return 1;
