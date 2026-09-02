@@ -11,7 +11,7 @@
 #include <algorithm>
 
 // ============================================================
-// RIPLEY2048 PowerOff Edition — GAME + ALBUM
+// RIPLEY2048 PowerOff Edition v1.1 — GAME + ALBUM + 2-MIN AUTO-OFF
 // ============================================================
 // Native PaperS3 power behavior:
 //   single click side button = power ON
@@ -4047,6 +4047,42 @@ void handleAlbumPickerTap(int x, int y) {
 }
 
 // ============================================================
+// AUTO POWER-OFF
+// ============================================================
+
+static constexpr uint32_t AUTO_POWEROFF_MS = 2UL * 60UL * 1000UL;
+uint32_t lastUserActivityMs = 0;
+
+static inline void markUserActivity() {
+  lastUserActivityMs = millis();
+}
+
+static void autoPowerOffNow() {
+  // Preserve exactly the last visible E-Ink frame.
+  M5.Display.waitDisplay();
+
+  // Resume data is continuously checkpointed by the existing logic.
+  // True PaperS3 main-power OFF: touch cannot wake it.
+  M5.Power.powerOff();
+
+  // Safety fallback; normally powerOff() never returns.
+  while (true) {
+    delay(1000);
+  }
+}
+
+static inline void serviceAutoPowerOff(uint32_t nowMs) {
+  // Do not cut power while a finger/gesture is active.
+  if (touchTracking) {
+    return;
+  }
+
+  if ((uint32_t)(nowMs - lastUserActivityMs) >= AUTO_POWEROFF_MS) {
+    autoPowerOffNow();
+  }
+}
+
+// ============================================================
 // SETUP
 // ============================================================
 
@@ -4125,6 +4161,9 @@ void setup() {
     forceFullRefresh = true;
     drawFullGame();
   }
+
+  // Begin the inactivity countdown only after boot/resume has completed.
+  markUserActivity();
 }
 
 // ============================================================
@@ -4164,6 +4203,8 @@ void loop() {
 
   const uint32_t nowMs = millis();
 
+  serviceAutoPowerOff(nowMs);
+
   // POWER v5: deliberately no RTC polling, alarm polling,
   // clock maintenance, slideshow timer, Wi-Fi task or Bluetooth task.
 
@@ -4171,6 +4212,8 @@ void loop() {
     M5.Touch.getDetail();
 
   if (t.wasPressed()) {
+
+    markUserActivity();
 
     // A new interaction must use the original mature timing path.
     holdPowerAwakeForPanel();
