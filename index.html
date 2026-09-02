@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Ripley2048 PaperS3 Installer</title>
+  <script type="module"
+    src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module">
+  </script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 680px; margin: 48px auto; padding: 0 20px; line-height: 1.5; }
+    .card { border: 1px solid #bbb; border-radius: 16px; padding: 24px; }
+    code { background: #eee; padding: 2px 5px; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Ripley2048 PaperS3</h1>
+    <p>PowerOff Edition — Game + Album.</p>
+    <p>Connect PaperS3 by USB. Long-press Power until the rear red LED flashes, then click Install.</p>
+    <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+    <p><small>Use desktop Chrome/Edge with Web Serial. iPadOS is not the primary USB flashing path.</small></p>
+  </div>
+</body>
+</html>
