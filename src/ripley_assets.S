@@ -35,3 +35,16 @@ ripley_bg4_end:
 ripley_bg5_start:
 .incbin "src/assets/bg5.bin"
 ripley_bg5_end:
+.balign 4
+.global ripley_bg6_start
+.global ripley_bg6_end
+ripley_bg6_start:
+.incbin "src/assets/bg6.bin"
+ripley_bg6_end:
+.balign 4
+.global ripley_bg7_start
+.global ripley_bg7_end
+ripley_bg7_start:
+.incbin "src/assets/bg7.bin"
+ripley_bg7_end:
+.balign 4
