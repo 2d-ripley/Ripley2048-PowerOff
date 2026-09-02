@@ -11,7 +11,7 @@
 #include <algorithm>
 
 // ============================================================
-// RIPLEY2048 PowerOff Edition v1.3.0 — STANDALONE GAME + ALBUM + 2-MIN AUTO-OFF
+// RIPLEY2048 PowerOff Edition v1.3.1 — STANDALONE GAME + ALBUM + 2-MIN AUTO-OFF
 // ============================================================
 // Native PaperS3 power behavior:
 //   single click side button = power ON
@@ -76,6 +76,8 @@ static constexpr uint8_t TILE_4096_GRAY   = 225;
 static constexpr uint8_t TILE_8192_GRAY   = 205;
 static constexpr uint8_t TILE_16384_GRAY  = 185;
 static constexpr uint8_t TILE_32768_GRAY  = 165;
+static constexpr uint8_t TILE_65536_GRAY  = 145;
+static constexpr uint8_t TILE_131072_GRAY = 225;
 
 static constexpr uint8_t UI_BLACK_GRAY = 0;
 static constexpr uint8_t UI_DARK_GRAY  = 85;
@@ -376,6 +378,19 @@ int touchStartY = 0;
 bool touchTracking = false;
 uint32_t touchStartMs = 0;
 
+// Hidden developer milestone tester.
+// Hold the LOAD triangle for 10 seconds to enter/exit.
+// While active: tap LOAD triangle = next milestone; SAVE triangle = previous.
+static constexpr uint32_t DEV_LOAD_LONG_PRESS_MS = 10000;
+bool developerTestMode = false;
+int developerTestLevel = 1;
+uint64_t developerSavedBoard[4][4] = {};
+uint64_t developerSavedScore = 0;
+uint64_t developerSavedBestScore = 0;
+bool developerSavedGameOver = false;
+int developerSavedBackgroundLevel = 0;
+
+
 // Dedicated guard for CLOCK -> PHOTO long press.
 // A stale/global touch sequence is never allowed to enter Album.
 bool clockAlbumPressArmed = false;
@@ -481,7 +496,7 @@ bool loadResumeGame() {
   memcpy(board, s.board, sizeof(board));
   score = s.score;
   bestScore = s.bestScore;
-  backgroundLevel = constrain((int)s.backgroundLevel, 0, 5);
+  backgroundLevel = constrain((int)s.backgroundLevel, 0, 7);
   oldBackgroundLevel = backgroundLevel;
   selectedSaveSlot = constrain((int)s.selectedSaveSlot, 1, 3);
   gameOver = s.gameOver != 0;
@@ -610,8 +625,11 @@ uint8_t getTileGray(uint64_t v) {
   if (v == 2048)  return TILE_2048_GRAY;
   if (v == 4096)  return TILE_4096_GRAY;
   if (v == 8192)  return TILE_8192_GRAY;
-  if (v == 16384) return TILE_16384_GRAY;
-  return TILE_32768_GRAY;
+  if (v == 16384)  return TILE_16384_GRAY;
+  if (v == 32768)  return TILE_32768_GRAY;
+  if (v == 65536)  return TILE_65536_GRAY;
+  if (v == 131072) return TILE_131072_GRAY;
+  return TILE_131072_GRAY;
 }
 
 void printU64(uint64_t n) {
@@ -830,6 +848,60 @@ void updateBackgroundLevel() {
   if (reached > backgroundLevel) {
     backgroundLevel = reached;
   }
+}
+
+// ============================================================
+// HIDDEN DEVELOPER MILESTONE TESTER
+// ============================================================
+
+static uint64_t developerMilestoneValue(int level) {
+  static const uint64_t values[8] = {
+    0, 2048, 4096, 8192, 16384, 32768, 65536, 131072
+  };
+  return values[constrain(level, 0, 7)];
+}
+
+static void showDeveloperTestLevel(int level) {
+  developerTestLevel = constrain(level, 0, 7);
+  clearBoard();
+
+  const uint64_t v = developerMilestoneValue(developerTestLevel);
+  if (v != 0) board[1][1] = v;
+
+  // A few small tiles make it easy to verify the board renderer too,
+  // without creating merges or changing the user's real saved game.
+  board[2][1] = 2;
+  board[2][2] = 4;
+
+  score = 0;
+  gameOver = false;
+  backgroundLevel = developerTestLevel;
+  moveCount = 0;
+  forceFullRefresh = true;
+  drawFullGame();
+}
+
+static void enterDeveloperTestMode() {
+  memcpy(developerSavedBoard, board, sizeof(board));
+  developerSavedScore = score;
+  developerSavedBestScore = bestScore;
+  developerSavedGameOver = gameOver;
+  developerSavedBackgroundLevel = backgroundLevel;
+  developerTestMode = true;
+  showDeveloperTestLevel(1);  // start at 2048 / bg1
+}
+
+static void exitDeveloperTestMode() {
+  memcpy(board, developerSavedBoard, sizeof(board));
+  score = developerSavedScore;
+  bestScore = developerSavedBestScore;
+  gameOver = developerSavedGameOver;
+  backgroundLevel = developerSavedBackgroundLevel;
+  oldBackgroundLevel = backgroundLevel;
+  developerTestMode = false;
+  moveCount = 0;
+  forceFullRefresh = true;
+  drawFullGame();
 }
 
 // ============================================================
@@ -3285,7 +3357,7 @@ void loadGame(int slot) {
   gameOver = isGameOver();
   moveCount = 0;
   int boardLevel = backgroundLevelForValue(getMaximumTile());
-  backgroundLevel = constrain((int)s.backgroundLevel, 0, 5);
+  backgroundLevel = constrain((int)s.backgroundLevel, 0, 7);
   if (boardLevel > backgroundLevel) backgroundLevel = boardLevel;
   oldBackgroundLevel = backgroundLevel;
   forceFullRefresh = true;
@@ -4278,6 +4350,45 @@ void loop() {
   }
 
   // v5: no CLOCK mode.
+
+  // ==========================================================
+  // HIDDEN DEVELOPER MILESTONE TESTER
+  // ==========================================================
+
+  const bool startedOnLoadIcon = pointInRect(
+    touchStartX, touchStartY,
+    LOAD_ICON_X, SIDE_ICON_Y, SIDE_ICON_SIZE, SIDE_ICON_SIZE
+  );
+
+  const bool startedOnSaveIcon = pointInRect(
+    touchStartX, touchStartY,
+    SAVE_ICON_X, SIDE_ICON_Y, SIDE_ICON_SIZE, SIDE_ICON_SIZE
+  );
+
+  // Hold LOAD triangle for 10 seconds to toggle developer test mode.
+  if (stayedStill && heldMs >= DEV_LOAD_LONG_PRESS_MS && startedOnLoadIcon) {
+    if (developerTestMode) exitDeveloperTestMode();
+    else enterDeveloperTestMode();
+    return;
+  }
+
+  if (developerTestMode) {
+    // Short tap LOAD triangle -> next milestone/background.
+    if (stayedStill && heldMs < DEV_LOAD_LONG_PRESS_MS && startedOnLoadIcon) {
+      showDeveloperTestLevel((developerTestLevel + 1) & 7);
+      return;
+    }
+
+    // Short tap SAVE triangle -> previous milestone/background.
+    if (stayedStill && startedOnSaveIcon) {
+      showDeveloperTestLevel((developerTestLevel + 7) & 7);
+      return;
+    }
+
+    // Ignore all other GAME gestures while testing so the real game
+    // cannot accidentally be overwritten or moved.
+    return;
+  }
 
   // ==========================================================
   // GAME MODE LONG PRESSES
