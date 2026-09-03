@@ -1,0 +1,35 @@
+name: Apply v1.3.2 patch
+
+on:
+  push:
+    paths:
+      - 'tools/apply_v132.py'
+      - '.github/workflows/apply-v132.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply v1.3.2 source patch
+        run: python3 tools/apply_v132.py
+
+      - name: Commit patched firmware
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main.cpp web/manifest.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Ripley2048 v1.3.2 DEV badge and album delete"
+          git push
