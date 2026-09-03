@@ -4643,26 +4643,29 @@ void loop() {
     }
 
     // SAVE slots 1 / 2 / 3 — left side.
+    // Use touch-start coordinates for taps. GT911 release coordinates can
+    // drift a few pixels at the extreme screen edge, making these narrow
+    // controls appear intermittent even though the press was valid.
     if (
-      x >= SAVE_SLOT_X &&
-      x < SAVE_SLOT_X + SLOT_W
+      touchStartX >= SAVE_SLOT_X &&
+      touchStartX < SAVE_SLOT_X + SLOT_W
     ) {
 
       int slot = 0;
 
       if (
-        y >= SLOT_Y1 &&
-        y < SLOT_Y1 + SLOT_H
+        touchStartY >= SLOT_Y1 &&
+        touchStartY < SLOT_Y1 + SLOT_H
       ) {
         slot = 1;
       } else if (
-        y >= SLOT_Y2 &&
-        y < SLOT_Y2 + SLOT_H
+        touchStartY >= SLOT_Y2 &&
+        touchStartY < SLOT_Y2 + SLOT_H
       ) {
         slot = 2;
       } else if (
-        y >= SLOT_Y3 &&
-        y < SLOT_Y3 + SLOT_H
+        touchStartY >= SLOT_Y3 &&
+        touchStartY < SLOT_Y3 + SLOT_H
       ) {
         slot = 3;
       }
@@ -4685,26 +4688,27 @@ void loop() {
     }
 
     // LOAD slots 1 / 2 / 3 — right side.
+    // Same touch-start rule as SAVE; especially important at x=483..539.
     if (
-      x >= LOAD_SLOT_X &&
-      x < LOAD_SLOT_X + SLOT_W
+      touchStartX >= LOAD_SLOT_X &&
+      touchStartX < LOAD_SLOT_X + SLOT_W
     ) {
 
       int slot = 0;
 
       if (
-        y >= SLOT_Y1 &&
-        y < SLOT_Y1 + SLOT_H
+        touchStartY >= SLOT_Y1 &&
+        touchStartY < SLOT_Y1 + SLOT_H
       ) {
         slot = 1;
       } else if (
-        y >= SLOT_Y2 &&
-        y < SLOT_Y2 + SLOT_H
+        touchStartY >= SLOT_Y2 &&
+        touchStartY < SLOT_Y2 + SLOT_H
       ) {
         slot = 2;
       } else if (
-        y >= SLOT_Y3 &&
-        y < SLOT_Y3 + SLOT_H
+        touchStartY >= SLOT_Y3 &&
+        touchStartY < SLOT_Y3 + SLOT_H
       ) {
         slot = 3;
       }
