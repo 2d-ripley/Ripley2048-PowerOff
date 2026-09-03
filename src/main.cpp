@@ -4338,6 +4338,40 @@ void loop() {
     touchTracking =
       true;
 
+    // v1.3.2 reliability fix: SAVE/LOAD slot buttons live at the extreme
+    // left/right edges of the GT911 panel. A press can be detected while
+    // the corresponding release event is occasionally lost, so waiting for
+    // wasReleased() makes these buttons appear intermittent.
+    // Handle only the six slot buttons immediately on PRESS. They are outside
+    // the swipe board and do not overlap the 10-second DEV triangle gesture.
+    if (appMode == MODE_GAME && !developerTestMode) {
+      int pressedSlot = 0;
+      if (t.y >= SLOT_Y1 && t.y < SLOT_Y1 + SLOT_H) pressedSlot = 1;
+      else if (t.y >= SLOT_Y2 && t.y < SLOT_Y2 + SLOT_H) pressedSlot = 2;
+      else if (t.y >= SLOT_Y3 && t.y < SLOT_Y3 + SLOT_H) pressedSlot = 3;
+
+      if (pressedSlot != 0 &&
+          t.x >= SAVE_SLOT_X && t.x < SAVE_SLOT_X + SLOT_W) {
+        selectedSaveSlot = pressedSlot;
+        saveGame(pressedSlot);
+        forceFullRefresh = true;
+        drawFullGame();
+        touchTracking = false;
+        return;
+      }
+
+      if (pressedSlot != 0 &&
+          t.x >= LOAD_SLOT_X && t.x < LOAD_SLOT_X + SLOT_W) {
+        loadGame(pressedSlot);
+        saveResumeGame();
+        saveResumeMode(MODE_GAME);
+        forceFullRefresh = true;
+        drawFullGame();
+        touchTracking = false;
+        return;
+      }
+    }
+
     // v5 has no CLOCK mode.  Keep the old guard permanently disarmed.
     clockAlbumPressArmed = false;
   }
