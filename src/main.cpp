@@ -11,7 +11,7 @@
 #include <algorithm>
 
 // ============================================================
-// RIPLEY2048 PowerOff Edition v1.3.1 — STANDALONE GAME + ALBUM + 2-MIN AUTO-OFF
+// RIPLEY2048 PowerOff Edition v1.3.2 — STANDALONE GAME + ALBUM + 2-MIN AUTO-OFF
 // ============================================================
 // Native PaperS3 power behavior:
 //   single click side button = power ON
@@ -296,6 +296,15 @@ static constexpr uint32_t PHOTO_IDLE_DELAY_MS = 40;
 static constexpr int PHOTO_CORNER_HOTZONE = 120;
 static constexpr uint32_t PHOTO_CORNER_REFRESH_MS = 1000;
 
+// v1.3.2: long-press a picker row to request deletion.
+static constexpr uint32_t PHOTO_DELETE_LONG_PRESS_MS = 1500;
+static constexpr int PHOTO_DELETE_YES_X = 220;
+static constexpr int PHOTO_DELETE_YES_Y = 390;
+static constexpr int PHOTO_DELETE_BUTTON_W = 220;
+static constexpr int PHOTO_DELETE_BUTTON_H = 72;
+static constexpr int PHOTO_DELETE_CANCEL_X = 520;
+static constexpr int PHOTO_DELETE_CANCEL_Y = 390;
+
 // Clock mode — landscape 960 x 540.
 static constexpr int CLOCK_W = 960;
 static constexpr int CLOCK_H = 540;
@@ -406,6 +415,7 @@ enum AppMode {
   MODE_SET_ALARM,
   MODE_PHOTO,
   MODE_PHOTO_PICKER,
+  MODE_PHOTO_DELETE_CONFIRM,
   MODE_ALARM_RINGING
 };
 
@@ -507,7 +517,8 @@ bool loadResumeGame() {
 
 void saveResumeMode(AppMode mode) {
   // Only persist the two user-facing states. Picker resumes into Album.
-  uint8_t m = (mode == MODE_PHOTO || mode == MODE_PHOTO_PICKER) ? 1 : 0;
+  uint8_t m = (mode == MODE_PHOTO || mode == MODE_PHOTO_PICKER ||
+               mode == MODE_PHOTO_DELETE_CONFIRM) ? 1 : 0;
   resumePrefs.begin("ripleyresume", false);
   resumePrefs.putUChar("mode", m);
   resumePrefs.end();
@@ -525,6 +536,11 @@ int albumIndex = -1;
 int albumPickerPage = 0;
 bool albumHasSavedPhoto = false;
 uint32_t photoLastTapMs = 0;
+
+// v1.3.2 album delete confirmation state.
+int albumDeleteIndex = -1;
+String albumDeletePath = "";
+bool albumDeleteFailed = false;
 
 // Cached values prevent unnecessary E-Ink updates.
 int lastClockMinute = -1;
@@ -1748,6 +1764,14 @@ void deepCleanEpd();
 bool drawCurrentAlbumPhoto();
 static inline void holdPowerAwakeForPanel();
 static inline bool eventIdleLightSleep(uint32_t nowMs);
+
+static void drawDeveloperBadge() {
+  if (!developerTestMode) return;
+  M5.Display.setTextDatum(top_left);
+  M5.Display.setTextColor(gray565(UI_BLACK_GRAY));
+  M5.Display.setTextSize(2);
+  M5.Display.drawString("DEV", 470, 28);
+}
 
 // ============================================================
 // STRONG E-INK CLEAN
@@ -3204,6 +3228,7 @@ void drawFullGame() {
 
   drawGameOver();
   drawStatusBar();
+  drawDeveloperBadge();
 
   // Commit the already-quality-composed framebuffer in one full refresh.
   M5.Display.display();
@@ -3914,6 +3939,142 @@ void drawAlbumPicker() {
   M5.Display.setEpdMode(epd_mode_t::epd_fastest);
 }
 
+static int albumPickerIndexAt(int x, int y) {
+  if (x < 24 || x >= 936 || y < PHOTO_LIST_TOP) return -1;
+  const int row = (y - PHOTO_LIST_TOP) / PHOTO_LIST_ROW_H;
+  if (row < 0 || row >= PHOTO_LIST_ROWS) return -1;
+  const int rowTop = PHOTO_LIST_TOP + row * PHOTO_LIST_ROW_H;
+  if (y >= rowTop + PHOTO_LIST_ROW_H - 5) return -1;
+  const int idx = albumPickerPage * PHOTO_LIST_ROWS + row;
+  if (idx < 0 || idx >= (int)albumFiles.size()) return -1;
+  return idx;
+}
+
+void drawAlbumDeleteConfirm() {
+  M5.Display.setRotation(1);
+  M5.Display.fillScreen(gray565(UI_WHITE_GRAY));
+  M5.Display.setTextColor(gray565(UI_BLACK_GRAY));
+  M5.Display.setTextDatum(top_left);
+
+  M5.Display.setTextSize(4);
+  M5.Display.drawString(albumDeleteFailed ? "DELETE FAILED" : "DELETE PHOTO?", 70, 75);
+
+  M5.Display.setTextSize(2);
+  String label = albumBaseName(albumDeletePath);
+  if (label.length() > 64) label = label.substring(0, 61) + "...";
+  M5.Display.drawString(label, 70, 170);
+
+  if (!albumDeleteFailed) {
+    M5.Display.drawString("This permanently removes the file from /album.", 70, 245);
+    drawButton(PHOTO_DELETE_YES_X, PHOTO_DELETE_YES_Y,
+               PHOTO_DELETE_BUTTON_W, PHOTO_DELETE_BUTTON_H, "DELETE");
+  }
+
+  drawButton(PHOTO_DELETE_CANCEL_X, PHOTO_DELETE_CANCEL_Y,
+             PHOTO_DELETE_BUTTON_W, PHOTO_DELETE_BUTTON_H,
+             albumDeleteFailed ? "BACK" : "CANCEL");
+
+  M5.Display.setEpdMode(epd_mode_t::epd_quality);
+  M5.Display.display();
+  M5.Display.setEpdMode(epd_mode_t::epd_fastest);
+}
+
+void enterAlbumDeleteConfirm(int idx) {
+  if (idx < 0 || idx >= (int)albumFiles.size()) return;
+  albumDeleteIndex = idx;
+  albumDeletePath = albumFiles[idx];
+  albumDeleteFailed = false;
+  appMode = MODE_PHOTO_DELETE_CONFIRM;
+  saveResumeMode(MODE_PHOTO);
+  drawAlbumDeleteConfirm();
+}
+
+void cancelAlbumDelete() {
+  albumDeleteIndex = -1;
+  albumDeletePath = "";
+  albumDeleteFailed = false;
+  appMode = MODE_PHOTO_PICKER;
+  drawAlbumPicker();
+}
+
+void confirmAlbumDelete() {
+  if (albumDeleteIndex < 0 ||
+      albumDeleteIndex >= (int)albumFiles.size() ||
+      albumDeletePath.length() == 0) {
+    cancelAlbumDelete();
+    return;
+  }
+
+  const int deletedIndex = albumDeleteIndex;
+  String currentPath = "";
+  if (albumIndex >= 0 && albumIndex < (int)albumFiles.size()) {
+    currentPath = albumFiles[albumIndex];
+  }
+
+  mountSdIfNeeded();
+  if (!sdReady || !SD.remove(albumDeletePath.c_str())) {
+    albumDeleteFailed = true;
+    drawAlbumDeleteConfirm();
+    return;
+  }
+
+  const bool deletedCurrent = (currentPath == albumDeletePath);
+  scanAlbumFolder();
+
+  if (albumFiles.empty()) {
+    albumIndex = -1;
+    albumPickerPage = 0;
+  } else if (!deletedCurrent && currentPath.length()) {
+    int found = -1;
+    for (int i = 0; i < (int)albumFiles.size(); ++i) {
+      if (albumFiles[i] == currentPath) {
+        found = i;
+        break;
+      }
+    }
+    albumIndex = (found >= 0)
+      ? found
+      : min(deletedIndex, (int)albumFiles.size() - 1);
+    albumPickerPage = min(deletedIndex, (int)albumFiles.size() - 1) /
+                      PHOTO_LIST_ROWS;
+  } else {
+    albumIndex = min(deletedIndex, (int)albumFiles.size() - 1);
+    albumPickerPage = albumIndex / PHOTO_LIST_ROWS;
+  }
+
+  if (albumIndex >= 0) saveAlbumPosition();
+
+  albumDeleteIndex = -1;
+  albumDeletePath = "";
+  albumDeleteFailed = false;
+  appMode = MODE_PHOTO_PICKER;
+  drawAlbumPicker();
+}
+
+void handleAlbumDeleteConfirmTap(int x, int y) {
+  if (albumDeleteFailed) {
+    if (pointInRect(x, y,
+                    PHOTO_DELETE_CANCEL_X, PHOTO_DELETE_CANCEL_Y,
+                    PHOTO_DELETE_BUTTON_W, PHOTO_DELETE_BUTTON_H)) {
+      cancelAlbumDelete();
+    }
+    return;
+  }
+
+  if (pointInRect(x, y,
+                  PHOTO_DELETE_YES_X, PHOTO_DELETE_YES_Y,
+                  PHOTO_DELETE_BUTTON_W, PHOTO_DELETE_BUTTON_H)) {
+    confirmAlbumDelete();
+    return;
+  }
+
+  if (pointInRect(x, y,
+                  PHOTO_DELETE_CANCEL_X, PHOTO_DELETE_CANCEL_Y,
+                  PHOTO_DELETE_BUTTON_W, PHOTO_DELETE_BUTTON_H)) {
+    cancelAlbumDelete();
+  }
+}
+
 void enterPhotoMode() {
   mountSdIfNeeded();
 
@@ -4255,6 +4416,15 @@ void loop() {
   };
 
   // ==========================================================
+  // PHOTO DELETE CONFIRMATION
+  // ==========================================================
+
+  if (appMode == MODE_PHOTO_DELETE_CONFIRM) {
+    if (stayedStill) handleAlbumDeleteConfirmTap(x, y);
+    return;
+  }
+
+  // ==========================================================
   // PHOTO PICKER
   // ==========================================================
 
@@ -4280,6 +4450,14 @@ void loop() {
         }
       }
       return;
+    }
+
+    if (heldMs >= PHOTO_DELETE_LONG_PRESS_MS) {
+      const int idx = albumPickerIndexAt(touchStartX, touchStartY);
+      if (idx >= 0) {
+        enterAlbumDeleteConfirm(idx);
+        return;
+      }
     }
 
     if (heldMs >= PHOTO_LONG_PRESS_MS) {
